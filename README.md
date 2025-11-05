@@ -1,4 +1,6 @@
-# Welcome to your Lovable project
+# Smart-Kitchen-Optimization-System-Frontend-Workspace
+
+Smart Kitchen Optimization System Frontend Workspace using React.jsx
 
 ## Project info
 
@@ -24,10 +26,10 @@ Follow these steps:
 
 ```sh
 # Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+git clone https://github.com/gentlemanpearl/Smart-Kitchen-Optimization-System-Frontend-Workspace.git
 
 # Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+cd Smart-Kitchen-Optimization-System-Frontend-Workspace
 
 # Step 3: Install the necessary dependencies.
 npm i
@@ -55,7 +57,7 @@ npm run dev
 This project is built with:
 
 - Vite
-- TypeScript
+- JavaScript/JSX (converted from TypeScript)
 - React
 - shadcn-ui
 - Tailwind CSS
