@@ -1,24 +1,26 @@
+import { useState, useEffect } from "react"
 import { StatCard } from "@/components/StatCard"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Package, ChefHat, AlertTriangle, ShoppingCart, TrendingUp, Clock } from "lucide-react"
 import { Progress } from "@/components/ui/progress"
+import { fetchDashboardStats, fetchTotalInventory, fetchLowStockItems } from "@/lib/api"
 
 export default function Dashboard() {
-  const stats = [
+  const [stats, setStats] = useState([
     {
       title: "Total Inventory Items",
-      value: 38,
+      value: 0,
       icon: Package,
       description: "Active ingredients",
-      trend: { value: 12, isPositive: true },
+      trend: { value: 0, isPositive: true },
       variant: "default"
     },
     {
       title: "Total Recipes",
-      value: 6,
+      value: 0,
       icon: ChefHat,
       description: "Available recipes",
-      trend: { value: 2, isPositive: true },
+      trend: { value: 0, isPositive: true },
       variant: "success"
     },
     {
@@ -35,20 +37,172 @@ export default function Dashboard() {
       description: "With current inventory",
       variant: "info"
     }
-  ]
+  ])
+  const [loading, setLoading] = useState(true)
 
-  const recentActivity = [
+  // Load dashboard data from backend and localStorage
+  const loadDashboardData = async () => {
+    try {
+      setLoading(true)
+      
+      // Fetch all stats from backend
+      const [dashboardStats, totalInventory, lowStockData] = await Promise.all([
+        fetchDashboardStats(),
+        fetchTotalInventory(),
+        fetchLowStockItems()
+      ])
+      
+      // Update stats from backend
+      setStats([
+        {
+          title: "Total Inventory Items",
+          value: dashboardStats.totalInventoryItems || totalInventory || 0,
+          icon: Package,
+          description: "Active ingredients",
+          trend: { value: 0, isPositive: true },
+          variant: "default"
+        },
+        {
+          title: "Total Recipes",
+          value: dashboardStats.totalRecipes || 0,
+          icon: ChefHat,
+          description: "Available recipes",
+          trend: { value: 0, isPositive: true },
+          variant: "success"
+        },
+        {
+          title: "Low Stock Items",
+          value: dashboardStats.lowStockItems || lowStockData.length || 0,
+          icon: AlertTriangle,
+          description: "Need attention",
+          variant: "warning"
+        },
+        {
+          title: "Recipes You Can Make",
+          value: dashboardStats.recipesCanMake || 0,
+          icon: ShoppingCart,
+          description: "With current inventory",
+          variant: "info"
+        }
+      ])
+
+      // Update low stock items from backend
+      const lowStock = lowStockData.map(item => ({
+        name: item.name,
+        current: item.currentQuantity || item.current,
+        threshold: item.threshold,
+        percentage: item.percentage || Math.round(((item.currentQuantity || item.current) / item.threshold) * 100)
+      }))
+      setLowStockItems(lowStock.length > 0 ? lowStock : [])
+    } catch (error) {
+      console.error('Error loading dashboard data:', error)
+      // Fallback to localStorage
+      try {
+        const savedInventory = localStorage.getItem('kitchenInventory')
+        if (savedInventory) {
+          const inventoryItems = JSON.parse(savedInventory)
+          const totalInventoryItems = inventoryItems.length
+          const lowStockCount = inventoryItems.filter(item => (item.quantity || 0) <= (item.threshold || 0)).length
+          
+          setStats([
+            {
+              title: "Total Inventory Items",
+              value: totalInventoryItems,
+              icon: Package,
+              description: "Active ingredients",
+              trend: { value: 0, isPositive: true },
+              variant: "default"
+            },
+            {
+              title: "Total Recipes",
+              value: 0,
+              icon: ChefHat,
+              description: "Available recipes",
+              trend: { value: 0, isPositive: true },
+              variant: "success"
+            },
+            {
+              title: "Low Stock Items",
+              value: lowStockCount,
+              icon: AlertTriangle,
+              description: "Need attention",
+              variant: "warning"
+            },
+            {
+              title: "Recipes You Can Make",
+              value: 0,
+              icon: ShoppingCart,
+              description: "With current inventory",
+              variant: "info"
+            }
+          ])
+          
+          const lowStock = inventoryItems
+            .filter(item => (item.quantity || 0) <= (item.threshold || 0))
+            .map(item => ({
+              name: item.name,
+              current: item.quantity,
+              threshold: item.threshold,
+              percentage: Math.round((item.quantity / item.threshold) * 100)
+            }))
+          setLowStockItems(lowStock)
+        }
+      } catch (e) {
+        console.error('Error with fallback:', e)
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadDashboardData()
+
+    // Listen for storage changes (when inventory is updated in other tabs)
+    const handleStorageChange = () => {
+      loadDashboardData()
+    }
+    
+    // Listen for custom events (same window updates)
+    const handleInventoryUpdate = () => {
+      loadDashboardData()
+    }
+    
+    window.addEventListener('storage', handleStorageChange)
+    window.addEventListener('inventoryUpdated', handleInventoryUpdate)
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange)
+      window.removeEventListener('inventoryUpdated', handleInventoryUpdate)
+    }
+  }, [])
+
+  const [recentActivity] = useState([
     { action: "Added Mushrooms", time: "2 hours ago", type: "inventory" },
     { action: "Updated Masala Chai recipe", time: "1 day ago", type: "recipe" },
     { action: "Low stock alert: Yeast", time: "2 days ago", type: "alert" },
     { action: "Added new recipe: Naan", time: "3 days ago", type: "recipe" },
-  ]
+  ])
 
-  const lowStockItems = [
-    { name: "Yeast", current: 20, threshold: 25, percentage: 80 },
-    { name: "Baking Soda", current: 50, threshold: 60, percentage: 83 },
-    { name: "Capsicum", current: 4, threshold: 8, percentage: 50 },
-  ]
+  const [lowStockItems, setLowStockItems] = useState([])
+
+  if (loading) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <div className="text-center lg:text-left animate-slide-up">
+          <h1 className="text-4xl lg:text-5xl font-bold tracking-tight gradient-text mb-2">
+            Smart Kitchen Dashboard
+          </h1>
+          <p className="text-lg text-muted-foreground">
+            Welcome to your intelligent cooking companion
+          </p>
+        </div>
+        <div className="flex items-center justify-center py-12">
+          <div className="text-muted-foreground">Loading dashboard data...</div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6 animate-fade-in">

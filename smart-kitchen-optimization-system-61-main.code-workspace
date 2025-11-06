@@ -2,6 +2,9 @@
 	"folders": [
 		{
 			"path": "."
+		},
+		{
+			"path": "../../Recepie Backend datasets"
 		}
 	],
 	"settings": {}

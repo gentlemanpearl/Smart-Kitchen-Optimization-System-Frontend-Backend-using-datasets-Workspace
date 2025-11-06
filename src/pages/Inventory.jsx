@@ -1,4 +1,5 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { fetchInventoryItems, createInventoryItem, updateInventoryItem, deleteInventoryItem } from "@/lib/api"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -29,14 +30,62 @@ import {
 } from "@/components/ui/select"
 
 export default function Inventory() {
-  const [items, setItems] = useState([
-    { id: "1", name: "Yeast", category: "Other", quantity: 20, unit: "g", threshold: 5 },
-    { id: "2", name: "Baking Soda", category: "Other", quantity: 50, unit: "g", threshold: 10 },
-    { id: "3", name: "Cashew Nuts", category: "Other", quantity: 100, unit: "g", threshold: 20 },
-    { id: "4", name: "Capsicum", category: "Vegetables", quantity: 4, unit: "pieces", threshold: 1 },
-    { id: "5", name: "Cauliflower", category: "Vegetables", quantity: 2, unit: "pieces", threshold: 1 },
-    { id: "6", name: "Mushrooms", category: "Vegetables", quantity: 300, unit: "g", threshold: 100 },
-  ])
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [useBackend, setUseBackend] = useState(true)
+
+  // Load inventory from backend or localStorage
+  useEffect(() => {
+    const loadInventory = async () => {
+      setLoading(true)
+      try {
+        if (useBackend) {
+          const backendItems = await fetchInventoryItems()
+          // Convert backend format to frontend format
+          const formattedItems = backendItems.map(item => ({
+            id: item._id || item.id,
+            name: item.name,
+            category: item.category,
+            quantity: item.currentQuantity || item.quantity,
+            unit: item.unit,
+            threshold: item.threshold,
+            perishable: item.perishable || false
+          }))
+          setItems(formattedItems)
+          // Also save to localStorage as backup
+          localStorage.setItem('kitchenInventory', JSON.stringify(formattedItems))
+        } else {
+          // Fallback to localStorage
+          const saved = localStorage.getItem('kitchenInventory')
+          if (saved) {
+            setItems(JSON.parse(saved))
+          } else {
+            // Default items
+            setItems([
+              { id: "1", name: "Yeast", category: "Other", quantity: 20, unit: "g", threshold: 25 },
+              { id: "2", name: "Baking Soda", category: "Other", quantity: 50, unit: "g", threshold: 60 },
+              { id: "3", name: "Cashew Nuts", category: "Other", quantity: 100, unit: "g", threshold: 20 },
+              { id: "4", name: "Capsicum", category: "Vegetables", quantity: 4, unit: "pieces", threshold: 8 },
+              { id: "5", name: "Cauliflower", category: "Vegetables", quantity: 2, unit: "pieces", threshold: 1 },
+              { id: "6", name: "Mushrooms", category: "Vegetables", quantity: 300, unit: "g", threshold: 100 },
+            ])
+          }
+        }
+      } catch (error) {
+        console.error('Error loading inventory:', error)
+        // Fallback to localStorage
+        setUseBackend(false)
+        const saved = localStorage.getItem('kitchenInventory')
+        if (saved) {
+          setItems(JSON.parse(saved))
+        }
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadInventory()
+  }, [useBackend])
 
   const [searchTerm, setSearchTerm] = useState("")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
@@ -53,20 +102,75 @@ export default function Inventory() {
     item.category.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
-  const handleAddItem = () => {
+  const handleAddItem = async () => {
     if (newItem.name && newItem.category && newItem.unit) {
-      const item = {
-        id: Date.now().toString(),
-        ...newItem
+      try {
+        if (useBackend) {
+          const itemData = {
+            name: newItem.name,
+            category: newItem.category,
+            currentQuantity: newItem.quantity,
+            unit: newItem.unit,
+            threshold: newItem.threshold,
+            perishable: newItem.perishable || false
+          }
+          const savedItem = await createInventoryItem(itemData)
+          const formattedItem = {
+            id: savedItem._id || savedItem.id,
+            name: savedItem.name,
+            category: savedItem.category,
+            quantity: savedItem.currentQuantity || savedItem.quantity,
+            unit: savedItem.unit,
+            threshold: savedItem.threshold,
+            perishable: savedItem.perishable || false
+          }
+          setItems(prev => [...prev, formattedItem])
+          localStorage.setItem('kitchenInventory', JSON.stringify([...items, formattedItem]))
+        } else {
+          const item = {
+            id: Date.now().toString(),
+            ...newItem
+          }
+          const newItems = [...items, item]
+          setItems(newItems)
+          localStorage.setItem('kitchenInventory', JSON.stringify(newItems))
+        }
+        window.dispatchEvent(new CustomEvent('inventoryUpdated'))
+        setNewItem({ name: "", category: "", quantity: 0, unit: "", threshold: 0 })
+        setIsAddDialogOpen(false)
+      } catch (error) {
+        console.error('Error adding item:', error)
+        // Fallback to localStorage
+        const item = {
+          id: Date.now().toString(),
+          ...newItem
+        }
+        const newItems = [...items, item]
+        setItems(newItems)
+        localStorage.setItem('kitchenInventory', JSON.stringify(newItems))
+        setNewItem({ name: "", category: "", quantity: 0, unit: "", threshold: 0 })
+        setIsAddDialogOpen(false)
       }
-      setItems([...items, item])
-      setNewItem({ name: "", category: "", quantity: 0, unit: "", threshold: 0 })
-      setIsAddDialogOpen(false)
     }
   }
 
-  const handleDeleteItem = (id) => {
-    setItems(items.filter(item => item.id !== id))
+  const handleDeleteItem = async (id) => {
+    try {
+      if (useBackend) {
+        await deleteInventoryItem(id)
+      }
+      const newItems = items.filter(item => item.id !== id)
+      setItems(newItems)
+      localStorage.setItem('kitchenInventory', JSON.stringify(newItems))
+      window.dispatchEvent(new CustomEvent('inventoryUpdated'))
+    } catch (error) {
+      console.error('Error deleting item:', error)
+      // Fallback to localStorage
+      const newItems = items.filter(item => item.id !== id)
+      setItems(newItems)
+      localStorage.setItem('kitchenInventory', JSON.stringify(newItems))
+      window.dispatchEvent(new CustomEvent('inventoryUpdated'))
+    }
   }
 
   const getCategoryColor = (category) => {
@@ -79,7 +183,17 @@ export default function Inventory() {
     return colors[category] || "bg-muted text-muted-foreground"
   }
 
-  const isLowStock = (item) => item.quantity <= item.threshold
+  const isLowStock = (item) => (item.quantity || item.currentQuantity || 0) <= (item.threshold || 0)
+
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-center py-12">
+          <div className="text-muted-foreground">Loading inventory...</div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">

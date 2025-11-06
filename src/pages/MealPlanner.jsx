@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { fetchMealPlans, createMealPlan, deleteMealPlan, fetchRecipes } from "@/lib/api"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -12,36 +13,79 @@ import { useToast } from "@/hooks/use-toast"
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const MEAL_TYPES = ['breakfast', 'lunch', 'dinner', 'snack']
 
-// Sample recipes from the existing recipes page
-const AVAILABLE_RECIPES = [
-  'Butter Chicken', 'Vegetable Biryani', 'Paneer Tikka Masala', 'Dal Tadka',
-  'Chicken Curry', 'Aloo Gobi', 'Fish Curry', 'Rajma', 'Chole Bhature',
-  'Masala Dosa', 'Idli Sambar', 'Poha', 'Upma', 'Paratha'
-]
-
 export default function MealPlanner() {
   const [mealPlans, setMealPlans] = useState([])
+  const [availableRecipes, setAvailableRecipes] = useState([])
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [selectedDay, setSelectedDay] = useState("")
   const [selectedMealType, setSelectedMealType] = useState("")
   const [selectedRecipe, setSelectedRecipe] = useState("")
   const [notes, setNotes] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [useBackend, setUseBackend] = useState(true)
   const { toast } = useToast()
 
-  // Load meal plans from localStorage on component mount
+  // Load meal plans and recipes from backend
   useEffect(() => {
-    const savedMealPlans = localStorage.getItem('mealPlans')
-    if (savedMealPlans) {
-      setMealPlans(JSON.parse(savedMealPlans))
+    const loadData = async () => {
+      setLoading(true)
+      try {
+        if (useBackend) {
+          // Fetch meal plans from backend
+          const plans = await fetchMealPlans()
+          setMealPlans(plans.map(plan => ({
+            id: plan._id || plan.id,
+            day: plan.day,
+            mealType: plan.mealType,
+            recipeName: plan.recipeName,
+            notes: plan.notes || ''
+          })))
+          
+          // Fetch recipes from backend for dropdown
+          const recipesData = await fetchRecipes({ limit: 100 })
+          const recipeNames = recipesData.recipes?.map(r => r.name) || []
+          setAvailableRecipes(recipeNames.length > 0 ? recipeNames : [
+            'Butter Chicken', 'Vegetable Biryani', 'Paneer Tikka Masala', 'Dal Tadka',
+            'Chicken Curry', 'Aloo Gobi', 'Fish Curry', 'Rajma', 'Chole Bhature',
+            'Masala Dosa', 'Idli Sambar', 'Poha', 'Upma', 'Paratha'
+          ])
+          
+          // Also save to localStorage as backup
+          localStorage.setItem('mealPlans', JSON.stringify(plans))
+        } else {
+          // Fallback to localStorage
+          const savedMealPlans = localStorage.getItem('mealPlans')
+          if (savedMealPlans) {
+            setMealPlans(JSON.parse(savedMealPlans))
+          }
+          setAvailableRecipes([
+            'Butter Chicken', 'Vegetable Biryani', 'Paneer Tikka Masala', 'Dal Tadka',
+            'Chicken Curry', 'Aloo Gobi', 'Fish Curry', 'Rajma', 'Chole Bhature',
+            'Masala Dosa', 'Idli Sambar', 'Poha', 'Upma', 'Paratha'
+          ])
+        }
+      } catch (error) {
+        console.error('Error loading meal plans:', error)
+        // Fallback to localStorage
+        setUseBackend(false)
+        const savedMealPlans = localStorage.getItem('mealPlans')
+        if (savedMealPlans) {
+          setMealPlans(JSON.parse(savedMealPlans))
+        }
+        setAvailableRecipes([
+          'Butter Chicken', 'Vegetable Biryani', 'Paneer Tikka Masala', 'Dal Tadka',
+          'Chicken Curry', 'Aloo Gobi', 'Fish Curry', 'Rajma', 'Chole Bhature',
+          'Masala Dosa', 'Idli Sambar', 'Poha', 'Upma', 'Paratha'
+        ])
+      } finally {
+        setLoading(false)
+      }
     }
-  }, [])
+    
+    loadData()
+  }, [useBackend])
 
-  // Save meal plans to localStorage whenever mealPlans changes
-  useEffect(() => {
-    localStorage.setItem('mealPlans', JSON.stringify(mealPlans))
-  }, [mealPlans])
-
-  const handleAddMeal = () => {
+  const handleAddMeal = async () => {
     if (!selectedDay || !selectedMealType || !selectedRecipe) {
       toast({
         title: "Missing Information",
@@ -51,35 +95,95 @@ export default function MealPlanner() {
       return
     }
 
-    const newMealPlan = {
-      id: Date.now().toString(),
-      day: selectedDay,
-      mealType: selectedMealType,
-      recipeName: selectedRecipe,
-      notes
+    try {
+      if (useBackend) {
+        const mealPlanData = {
+          day: selectedDay,
+          mealType: selectedMealType,
+          recipeName: selectedRecipe,
+          notes: notes || '',
+          servings: 4
+        }
+        const savedMealPlan = await createMealPlan(mealPlanData)
+        const newMealPlan = {
+          id: savedMealPlan._id || savedMealPlan.id,
+          day: savedMealPlan.day,
+          mealType: savedMealPlan.mealType,
+          recipeName: savedMealPlan.recipeName,
+          notes: savedMealPlan.notes || ''
+        }
+        setMealPlans(prev => [...prev, newMealPlan])
+        localStorage.setItem('mealPlans', JSON.stringify([...mealPlans, newMealPlan]))
+      } else {
+        const newMealPlan = {
+          id: Date.now().toString(),
+          day: selectedDay,
+          mealType: selectedMealType,
+          recipeName: selectedRecipe,
+          notes
+        }
+        setMealPlans(prev => [...prev, newMealPlan])
+        localStorage.setItem('mealPlans', JSON.stringify([...mealPlans, newMealPlan]))
+      }
+      
+      // Reset form
+      setSelectedDay("")
+      setSelectedMealType("")
+      setSelectedRecipe("")
+      setNotes("")
+      setIsAddDialogOpen(false)
+
+      toast({
+        title: "Meal Added",
+        description: `${selectedRecipe} added to ${selectedDay} ${selectedMealType}.`
+      })
+    } catch (error) {
+      console.error('Error adding meal plan:', error)
+      // Fallback to localStorage
+      const newMealPlan = {
+        id: Date.now().toString(),
+        day: selectedDay,
+        mealType: selectedMealType,
+        recipeName: selectedRecipe,
+        notes
+      }
+      setMealPlans(prev => [...prev, newMealPlan])
+      localStorage.setItem('mealPlans', JSON.stringify([...mealPlans, newMealPlan]))
+      setSelectedDay("")
+      setSelectedMealType("")
+      setSelectedRecipe("")
+      setNotes("")
+      setIsAddDialogOpen(false)
+      toast({
+        title: "Meal Added",
+        description: `${selectedRecipe} added to ${selectedDay} ${selectedMealType}.`
+      })
     }
-
-    setMealPlans(prev => [...prev, newMealPlan])
-    
-    // Reset form
-    setSelectedDay("")
-    setSelectedMealType("")
-    setSelectedRecipe("")
-    setNotes("")
-    setIsAddDialogOpen(false)
-
-    toast({
-      title: "Meal Added",
-      description: `${selectedRecipe} added to ${selectedDay} ${selectedMealType}.`
-    })
   }
 
-  const handleDeleteMeal = (id) => {
-    setMealPlans(prev => prev.filter(meal => meal.id !== id))
-    toast({
-      title: "Meal Removed",
-      description: "Meal has been removed from your plan."
-    })
+  const handleDeleteMeal = async (id) => {
+    try {
+      if (useBackend) {
+        await deleteMealPlan(id)
+      }
+      const newMealPlans = mealPlans.filter(meal => meal.id !== id)
+      setMealPlans(newMealPlans)
+      localStorage.setItem('mealPlans', JSON.stringify(newMealPlans))
+      toast({
+        title: "Meal Removed",
+        description: "Meal has been removed from your plan."
+      })
+    } catch (error) {
+      console.error('Error deleting meal plan:', error)
+      // Fallback to localStorage
+      const newMealPlans = mealPlans.filter(meal => meal.id !== id)
+      setMealPlans(newMealPlans)
+      localStorage.setItem('mealPlans', JSON.stringify(newMealPlans))
+      toast({
+        title: "Meal Removed",
+        description: "Meal has been removed from your plan."
+      })
+    }
   }
 
   const getMealsForDay = (day) => {
@@ -94,6 +198,16 @@ export default function MealPlanner() {
       case 'snack': return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <div className="flex items-center justify-center py-12">
+          <div className="text-muted-foreground">Loading meal plans...</div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -158,7 +272,7 @@ export default function MealPlanner() {
                     <SelectValue placeholder="Select recipe" />
                   </SelectTrigger>
                   <SelectContent>
-                    {AVAILABLE_RECIPES.map(recipe => (
+                    {availableRecipes.map(recipe => (
                       <SelectItem key={recipe} value={recipe}>{recipe}</SelectItem>
                     ))}
                   </SelectContent>

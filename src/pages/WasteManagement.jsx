@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { fetchWastePrediction, fetchWasteRecords, createWasteRecord, deleteWasteRecord, fetchWasteStats } from "@/lib/api"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -34,9 +35,110 @@ const UNITS = [
 
 export default function WasteManagement() {
   const [wasteItems, setWasteItems] = useState([])
+  const [predictedWaste, setPredictedWaste] = useState([])
+  const [wasteStats, setWasteStats] = useState({
+    totalWastedItems: 0,
+    totalCost: 0,
+    thisMonth: 0
+  })
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
+  const [loading, setLoading] = useState(true)
+  const [useBackend, setUseBackend] = useState(true)
   const { toast } = useToast()
+
+  // Load waste data from backend
+  useEffect(() => {
+    const loadWasteData = async () => {
+      try {
+        setLoading(true)
+        
+        if (useBackend) {
+          // Fetch waste records and stats from backend
+          const [recordsData, predictions, stats] = await Promise.all([
+            fetchWasteRecords(),
+            fetchWastePrediction(),
+            fetchWasteStats()
+          ])
+          
+          // Format waste records
+          const records = recordsData.records || recordsData || []
+          setWasteItems(records.map(record => ({
+            id: record._id || record.id,
+            itemName: record.itemName,
+            category: record.category,
+            quantity: record.quantity,
+            unit: record.unit,
+            reason: record.reason,
+            dateWasted: record.dateWasted || record.dateWasted,
+            estimatedCost: record.estimatedCost || 0,
+            notes: record.notes || ''
+          })))
+          
+          // Set stats
+          if (recordsData.stats) {
+            setWasteStats(recordsData.stats)
+          } else {
+            setWasteStats({
+              totalWastedItems: stats.totalWastedItems || records.length,
+              totalCost: stats.totalCost || records.reduce((sum, r) => sum + (r.estimatedCost || 0), 0),
+              thisMonth: stats.thisMonthCount || records.filter(r => {
+                const recordDate = new Date(r.dateWasted);
+                const now = new Date();
+                return recordDate.getMonth() === now.getMonth() && 
+                       recordDate.getFullYear() === now.getFullYear();
+              }).length
+            })
+          }
+          
+          setPredictedWaste(predictions || [])
+          
+          // Also save to localStorage as backup
+          localStorage.setItem('wasteItems', JSON.stringify(records))
+        } else {
+          // Fallback to localStorage
+          const savedWasteItems = localStorage.getItem('wasteItems')
+          if (savedWasteItems) {
+            const items = JSON.parse(savedWasteItems)
+            setWasteItems(items)
+            setWasteStats({
+              totalWastedItems: items.length,
+              totalCost: items.reduce((sum, item) => sum + (item.estimatedCost || 0), 0),
+              thisMonth: items.filter(item => {
+                const recordDate = new Date(item.dateWasted);
+                const now = new Date();
+                return recordDate.getMonth() === now.getMonth() && 
+                       recordDate.getFullYear() === now.getFullYear();
+              }).length
+            })
+          }
+        }
+      } catch (error) {
+        console.error('Error loading waste data:', error)
+        // Fallback to localStorage
+        setUseBackend(false)
+        const savedWasteItems = localStorage.getItem('wasteItems')
+        if (savedWasteItems) {
+          const items = JSON.parse(savedWasteItems)
+          setWasteItems(items)
+          setWasteStats({
+            totalWastedItems: items.length,
+            totalCost: items.reduce((sum, item) => sum + (item.estimatedCost || 0), 0),
+            thisMonth: items.filter(item => {
+              const recordDate = new Date(item.dateWasted);
+              const now = new Date();
+              return recordDate.getMonth() === now.getMonth() && 
+                     recordDate.getFullYear() === now.getFullYear();
+            }).length
+          })
+        }
+      } finally {
+        setLoading(false)
+      }
+    }
+    
+    loadWasteData()
+  }, [useBackend])
 
   // Form state
   const [formData, setFormData] = useState({
@@ -63,7 +165,7 @@ export default function WasteManagement() {
     localStorage.setItem('wasteItems', JSON.stringify(wasteItems))
   }, [wasteItems])
 
-  const handleAddWasteItem = () => {
+  const handleAddWasteItem = async () => {
     if (!formData.itemName || !formData.category || !formData.quantity || !formData.unit || !formData.reason) {
       toast({
         title: "Missing Information",
@@ -73,45 +175,157 @@ export default function WasteManagement() {
       return
     }
 
-    const newWasteItem = {
-      id: Date.now().toString(),
-      itemName: formData.itemName,
-      category: formData.category,
-      quantity: parseFloat(formData.quantity),
-      unit: formData.unit,
-      reason: formData.reason,
-      dateWasted: formData.dateWasted,
-      estimatedCost: parseFloat(formData.estimatedCost) || 0,
-      notes: formData.notes
+    try {
+      if (useBackend) {
+        const wasteRecordData = {
+          itemName: formData.itemName,
+          category: formData.category,
+          quantity: parseFloat(formData.quantity),
+          unit: formData.unit,
+          reason: formData.reason,
+          dateWasted: formData.dateWasted,
+          estimatedCost: parseFloat(formData.estimatedCost) || 0,
+          notes: formData.notes || ''
+        }
+        const savedRecord = await createWasteRecord(wasteRecordData)
+        const newWasteItem = {
+          id: savedRecord._id || savedRecord.id,
+          itemName: savedRecord.itemName,
+          category: savedRecord.category,
+          quantity: savedRecord.quantity,
+          unit: savedRecord.unit,
+          reason: savedRecord.reason,
+          dateWasted: savedRecord.dateWasted,
+          estimatedCost: savedRecord.estimatedCost || 0,
+          notes: savedRecord.notes || ''
+        }
+        setWasteItems(prev => [...prev, newWasteItem])
+        localStorage.setItem('wasteItems', JSON.stringify([...wasteItems, newWasteItem]))
+        
+        // Update stats
+        setWasteStats(prev => ({
+          totalWastedItems: prev.totalWastedItems + 1,
+          totalCost: prev.totalCost + (newWasteItem.estimatedCost || 0),
+          thisMonth: new Date(newWasteItem.dateWasted).getMonth() === new Date().getMonth() ? prev.thisMonth + 1 : prev.thisMonth
+        }))
+      } else {
+        const newWasteItem = {
+          id: Date.now().toString(),
+          itemName: formData.itemName,
+          category: formData.category,
+          quantity: parseFloat(formData.quantity),
+          unit: formData.unit,
+          reason: formData.reason,
+          dateWasted: formData.dateWasted,
+          estimatedCost: parseFloat(formData.estimatedCost) || 0,
+          notes: formData.notes
+        }
+        setWasteItems(prev => [...prev, newWasteItem])
+        localStorage.setItem('wasteItems', JSON.stringify([...wasteItems, newWasteItem]))
+        
+        // Update stats
+        setWasteStats(prev => ({
+          totalWastedItems: prev.totalWastedItems + 1,
+          totalCost: prev.totalCost + (newWasteItem.estimatedCost || 0),
+          thisMonth: new Date(newWasteItem.dateWasted).getMonth() === new Date().getMonth() ? prev.thisMonth + 1 : prev.thisMonth
+        }))
+      }
+      
+      // Reset form
+      setFormData({
+        itemName: "",
+        category: "",
+        quantity: "",
+        unit: "",
+        reason: "",
+        dateWasted: format(new Date(), 'yyyy-MM-dd'),
+        estimatedCost: "",
+        notes: ""
+      })
+      setIsAddDialogOpen(false)
+
+      toast({
+        title: "Waste Item Added",
+        description: `${formData.itemName} has been recorded as waste.`
+      })
+    } catch (error) {
+      console.error('Error adding waste record:', error)
+      // Fallback to localStorage
+      const newWasteItem = {
+        id: Date.now().toString(),
+        itemName: formData.itemName,
+        category: formData.category,
+        quantity: parseFloat(formData.quantity),
+        unit: formData.unit,
+        reason: formData.reason,
+        dateWasted: formData.dateWasted,
+        estimatedCost: parseFloat(formData.estimatedCost) || 0,
+        notes: formData.notes
+      }
+      setWasteItems(prev => [...prev, newWasteItem])
+      localStorage.setItem('wasteItems', JSON.stringify([...wasteItems, newWasteItem]))
+      setFormData({
+        itemName: "",
+        category: "",
+        quantity: "",
+        unit: "",
+        reason: "",
+        dateWasted: format(new Date(), 'yyyy-MM-dd'),
+        estimatedCost: "",
+        notes: ""
+      })
+      setIsAddDialogOpen(false)
+      toast({
+        title: "Waste Item Added",
+        description: `${formData.itemName} has been recorded as waste.`
+      })
     }
-
-    setWasteItems(prev => [...prev, newWasteItem])
-    
-    // Reset form
-    setFormData({
-      itemName: "",
-      category: "",
-      quantity: "",
-      unit: "",
-      reason: "",
-      dateWasted: format(new Date(), 'yyyy-MM-dd'),
-      estimatedCost: "",
-      notes: ""
-    })
-    setIsAddDialogOpen(false)
-
-    toast({
-      title: "Waste Item Added",
-      description: `${formData.itemName} has been recorded as waste.`
-    })
   }
 
-  const handleDeleteWasteItem = (id) => {
-    setWasteItems(prev => prev.filter(item => item.id !== id))
-    toast({
-      title: "Item Removed",
-      description: "Waste item has been removed from records."
-    })
+  const handleDeleteWasteItem = async (id) => {
+    try {
+      if (useBackend) {
+        await deleteWasteRecord(id)
+      }
+      const itemToDelete = wasteItems.find(item => item.id === id)
+      const newWasteItems = wasteItems.filter(item => item.id !== id)
+      setWasteItems(newWasteItems)
+      localStorage.setItem('wasteItems', JSON.stringify(newWasteItems))
+      
+      // Update stats
+      if (itemToDelete) {
+        setWasteStats(prev => ({
+          totalWastedItems: prev.totalWastedItems - 1,
+          totalCost: prev.totalCost - (itemToDelete.estimatedCost || 0),
+          thisMonth: new Date(itemToDelete.dateWasted).getMonth() === new Date().getMonth() ? prev.thisMonth - 1 : prev.thisMonth
+        }))
+      }
+      
+      toast({
+        title: "Item Removed",
+        description: "Waste item has been removed from records."
+      })
+    } catch (error) {
+      console.error('Error deleting waste record:', error)
+      // Fallback to localStorage
+      const itemToDelete = wasteItems.find(item => item.id === id)
+      const newWasteItems = wasteItems.filter(item => item.id !== id)
+      setWasteItems(newWasteItems)
+      localStorage.setItem('wasteItems', JSON.stringify(newWasteItems))
+      
+      if (itemToDelete) {
+        setWasteStats(prev => ({
+          totalWastedItems: prev.totalWastedItems - 1,
+          totalCost: prev.totalCost - (itemToDelete.estimatedCost || 0),
+          thisMonth: new Date(itemToDelete.dateWasted).getMonth() === new Date().getMonth() ? prev.thisMonth - 1 : prev.thisMonth
+        }))
+      }
+      
+      toast({
+        title: "Item Removed",
+        description: "Waste item has been removed from records."
+      })
+    }
   }
 
   const filteredWasteItems = wasteItems.filter(item =>
@@ -119,6 +333,19 @@ export default function WasteManagement() {
     item.category.toLowerCase().includes(searchTerm.toLowerCase()) ||
     item.reason.toLowerCase().includes(searchTerm.toLowerCase())
   )
+
+  const totalWastedCost = wasteStats.totalCost || wasteItems.reduce((sum, item) => sum + (item.estimatedCost || 0), 0)
+  const totalWastedItems = wasteStats.totalWastedItems || wasteItems.length
+
+  if (loading) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        <div className="flex items-center justify-center py-12">
+          <div className="text-muted-foreground">Loading waste data...</div>
+        </div>
+      </div>
+    )
+  }
 
   const getCategoryColor = (category) => {
     switch (category) {
@@ -140,9 +367,6 @@ export default function WasteManagement() {
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200'
     }
   }
-
-  const totalWastedCost = wasteItems.reduce((sum, item) => sum + item.estimatedCost, 0)
-  const totalWastedItems = wasteItems.length
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -323,7 +547,7 @@ export default function WasteManagement() {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-green-800 dark:text-green-300">
-              {wasteItems.filter(item => 
+              {wasteStats.thisMonth || wasteItems.filter(item => 
                 new Date(item.dateWasted).getMonth() === new Date().getMonth()
               ).length}
             </div>
@@ -336,6 +560,56 @@ export default function WasteManagement() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Waste Prediction Section */}
+      {predictedWaste.length > 0 && (
+        <Card className="border-warning">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-warning" />
+              AI Waste Prediction
+            </CardTitle>
+            <CardDescription>
+              Items at risk of being wasted based on usage patterns
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {predictedWaste.map((item) => (
+                <div key={item._id || item.id} className="p-3 border rounded-lg">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <div className="font-medium">{item.name}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {item.category} • {item.currentQuantity} {item.unit}
+                      </div>
+                    </div>
+                    <Badge className={
+                      item.wasteRisk === 'high' ? 'bg-red-500' :
+                      item.wasteRisk === 'medium' ? 'bg-orange-500' :
+                      'bg-yellow-500'
+                    }>
+                      {item.wasteRisk} risk
+                    </Badge>
+                  </div>
+                  {item.reasons && item.reasons.length > 0 && (
+                    <div className="text-sm text-muted-foreground">
+                      <ul className="list-disc list-inside">
+                        {item.reasons.map((reason, idx) => (
+                          <li key={idx}>{reason}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <div className="mt-2 text-xs text-muted-foreground">
+                    Usage: {item.usagePercentage}% of threshold
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Search */}
       <div className="flex items-center space-x-2">
