@@ -7,7 +7,7 @@ import {
   navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu"
 import { cn } from "@/lib/utils"
-import { Home, Package, ChefHat, Calendar, Trash2, Settings } from "lucide-react"
+import { Home, Package, ChefHat, Calendar, Trash2, Settings, Gauge } from "lucide-react"
 
 export function Navbar() {
   const location = useLocation()
@@ -37,6 +37,11 @@ export function Navbar() {
       title: "Waste Management",
       href: "/waste-management",
       icon: Trash2,
+    },
+    {
+      title: "Sensors",
+      href: "/sensors",
+      icon: Gauge,
     },
     {
       title: "Settings",
@@ -69,4 +74,3 @@ export function Navbar() {
     </NavigationMenu>
   )
 }
-
