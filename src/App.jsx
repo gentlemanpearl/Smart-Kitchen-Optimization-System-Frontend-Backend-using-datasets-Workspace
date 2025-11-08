@@ -9,6 +9,7 @@ import Inventory from "./pages/Inventory";
 import Recipes from "./pages/Recipes";
 import MealPlanner from "./pages/MealPlanner";
 import WasteManagement from "./pages/WasteManagement";
+import Sensors from "./pages/Sensors";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
@@ -27,6 +28,7 @@ const App = () => (
             <Route path="/recipes" element={<Recipes />} />
             <Route path="/meal-planner" element={<MealPlanner />} />
             <Route path="/waste-management" element={<WasteManagement />} />
+            <Route path="/sensors" element={<Sensors />} />
             <Route path="/settings" element={<Settings />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
@@ -38,4 +40,3 @@ const App = () => (
 );
 
 export default App;
-
